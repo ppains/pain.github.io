@@ -380,7 +380,7 @@
     </div>
     
     <div id="vipAnimationOverlay">
-        <img src="img/noel.gif" alt="VIP Effect">
+        <img src="noel.gif" alt="VIP Effect">
     </div>
   </div>
 
@@ -423,6 +423,14 @@
     let userDocUnsub = null;
     let usedCollection = 'users';
     let currentUserInModal = null;
+
+    // role renk haritası (aynı market ile)
+    const ROLE_MAP = {
+      'vip-': { label: 'VIP-', color: '#3b82f6', contrast: '#fff', multiplier: 1.25, withdrawBonusPercent: 10 },
+      'vip+': { label: 'VIP+', color: '#ef4444', contrast: '#fff', multiplier: 1.5, withdrawBonusPercent: 20 },
+      'mvp-': { label: 'MVP-', color: '#fbbf24', contrast: '#000', multiplier: 1.75, withdrawBonusPercent: 30 },
+      'mvp+': { label: 'MVP+', color: 'rainbow', contrast: '#000', perClickDollar: 1.00, withdrawBonusPercent: 50, priorityWithdraw: true }
+    };
 
     function hexToRgba(hex, a=1){
       if(!hex || hex === 'rainbow') return `rgba(0,0,0,${a})`;
@@ -485,6 +493,9 @@
       dailyClicksEl.textContent = dayC.toLocaleString('tr-TR');
     }
 
+    function encodeHTML(s){ return escapeHtml(s); }
+    function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"'`=\/]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','=':'&#x3D;','`':'&#x60;'}[c])); }
+
     function createCard(user){
       const card = document.createElement('div');
       card.className = 'user-card';
@@ -496,6 +507,18 @@
       let avatarHtml = '';
       if(user.avatarUrl){ avatarHtml = `<img src="${user.avatarUrl}" alt="u">`; }
       else { avatarHtml = (user.displayName||user.username||'U').substring(0,2).toUpperCase(); }
+
+      // build role tag if role exists (öncelik)
+      let roleTagHtml = '';
+      const role = (user.role || '').toLowerCase();
+      if(role && ROLE_MAP[role]){
+        const cfg = ROLE_MAP[role];
+        if(cfg.color === 'rainbow'){
+          roleTagHtml = `<span class="tag" style="background:linear-gradient(90deg,#ff004c,#ffd400,#00ff6a,#00d4ff,#7c3aed); color:#000; animation: rainbowGlow 2.8s linear infinite; margin-right:6px;">${encodeHTML(cfg.label)}</span>`;
+        } else {
+          roleTagHtml = `<span class="tag" style="background:${cfg.color}; color:${cfg.contrast || getContrastColor(cfg.color)}; box-shadow:0 0 10px ${hexToRgba(cfg.color,0.4)}; margin-right:6px;">${encodeHTML(cfg.label)}</span>`;
+        }
+      }
 
       const tagsArr = user.tagObjects || user.tags || user.profilEtiketleri || [];
       let tagsHtml = '';
@@ -527,7 +550,7 @@
             ${user.clan ? `<span style="color:#ffd700;"><i class="fa-solid fa-shield-halved"></i> ${escapeHtml(user.clan)}</span>` : ''}
             <span>#${(user.uid || user.id || '').substring(0,5)}</span>
           </div>
-          <div style="margin-top:8px;">${tagsHtml}</div>
+          <div style="margin-top:8px;">${roleTagHtml}${tagsHtml}</div>
         </div>
       `;
       card.onclick = ()=> openProfileRealtime(user);
@@ -575,8 +598,8 @@
       document.getElementById('pWithdraw').textContent = money(data.withdrawAmount);
       
       // Roller'i biraz daha şık gösterelim (HTML yapısını bozmadan textContent ile)
-      const rolesText = (data.roles && data.roles.length) ? data.roles.join(' • ') : 'Üye';
-      document.getElementById('pRoles').textContent = rolesText.toUpperCase();
+      const rolesText = (data.roles && data.roles.length) ? data.roles.join(' • ') : (data.role ? data.role : 'Üye');
+      document.getElementById('pRoles').textContent = String(rolesText).toUpperCase();
       
       document.getElementById('pAbout').textContent = data.about || data.bio || 'Henüz bir biyografi eklenmemiş.';
 
@@ -587,7 +610,26 @@
         pAvatar.textContent = (data.displayName||'U').substring(0,2).toUpperCase();
       }
 
-      pLevelBadge.textContent = data.level || 'LEVEL 1';
+      // pLevelBadge: gösterilecek rol bilgisi varsa ona göre renk verelim
+      const role = (data.role || '').toLowerCase();
+      if(role && ROLE_MAP[role]){
+        const cfg = ROLE_MAP[role];
+        pLevelBadge.textContent = cfg.label;
+        if(cfg.color === 'rainbow'){
+          pLevelBadge.style.background = 'linear-gradient(90deg,#ff004c,#ffd400,#00ff6a,#00d4ff,#7c3aed)';
+          pLevelBadge.style.color = cfg.contrast || '#000';
+          pLevelBadge.classList.add('glow-rainbow');
+        } else {
+          pLevelBadge.style.background = cfg.color;
+          pLevelBadge.style.color = cfg.contrast || getContrastColor(cfg.color);
+          pLevelBadge.classList.remove('glow-rainbow');
+        }
+      } else {
+        pLevelBadge.textContent = data.level || 'LEVEL 1';
+        pLevelBadge.style.background = '#3b82f6';
+        pLevelBadge.style.color = '#fff';
+        pLevelBadge.classList.remove('glow-rainbow');
+      }
 
       pTags.innerHTML = '';
       const tagsArr = data.tagObjects || data.tags || data.profilEtiketleri || [];
@@ -643,7 +685,7 @@
 
       const isPrem = user.isPremium || user.premium;
       const roles = (user.roles || []).map(r=>String(r).toLowerCase());
-      const isVip = roles.includes('vip') || roles.includes('admin') || roles.includes('kurucu');
+      const isVip = roles.includes('vip') || roles.includes('admin') || roles.includes('kurucu') || (user.role && ['vip-','vip+','mvp-','mvp+'].includes(String(user.role).toLowerCase()));
       if(isPrem || isVip) playVipAnimation();
     }
 
@@ -689,9 +731,6 @@
         }
     };
 
-    function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"'`=\/]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','=':'&#x3D;','`':'&#x60;'}[c])); }
-    function encodeHTML(s){ return escapeHtml(s); }
-
     document.getElementById('closeProfileBtnTop').onclick = ()=>{ overlay.classList.remove('open'); if(userDocUnsub) userDocUnsub(); vipOverlay.style.display='none'; };
     overlay.onclick = (e)=>{ if(e.target === overlay){ overlay.classList.remove('open'); vipOverlay.style.display='none'; } };
     
@@ -701,7 +740,8 @@
             (u.displayName||'').toLowerCase().includes(q) || 
             (u.id||'').toLowerCase().includes(q) || 
             (u.roles||[]).join(' ').toLowerCase().includes(q) ||
-            (u.clan||'').toLowerCase().includes(q)
+            (u.clan||'').toLowerCase().includes(q) ||
+            (u.role||'').toLowerCase().includes(q)
         ); 
         renderUsers(filtered); 
     });
@@ -730,5 +770,4 @@
     detectAndSubscribe();
   </script>
 </body>
-
 </html>
