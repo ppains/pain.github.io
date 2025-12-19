@@ -31,6 +31,7 @@
         <button id="logoutBtn" class="btn" style="display:none;">Çıkış</button>
       </div>
     </div>
+    
 
     <div style="margin-top:10px;">
       <div>Hesap: <span id="loggedUser">—</span> • Coin: <b id="myCoins">0</b> • Bakiye: <b id="myBalance">$0.00</b></div>
@@ -98,13 +99,14 @@
       for(const p of PRODUCTS){
         const card = document.createElement('div');
         card.className = 'card';
-        card.innerHTML = `<h3>${p.title}</h3><div class="price">${p.priceCoins.toLocaleString()} coin</div><div>${p.desc}</div><div style="margin-top:10px;"><button class="btn btn-primary" data-id="${p.id}">Satın Al</button></div>`;
+        // renk göstergesi
+        const colorTag = p.color === 'rainbow' ? `<span style="background:linear-gradient(90deg,#ff004c,#ffd400,#00ff6a,#00d4ff,#7c3aed); color:#000; padding:6px 8px; border-radius:6px;">${p.priceCoins.toLocaleString()} coin</span>` :
+          `<span style="background:${p.color}; color:${getContrastColor(p.color)}; padding:6px 8px; border-radius:6px;">${p.priceCoins.toLocaleString()} coin</span>`;
+        card.innerHTML = `<h3>${p.title}</h3><div class="price">${p.priceCoins.toLocaleString()} coin</div><div>${p.desc}</div><div style="margin-top:10px;"><button class="buy-btn" data-id="${p.id}">Satın Al</button></div>`;
         productsEl.appendChild(card);
       }
       // attach handlers
-      productsEl.querySelectorAll('button[data-id]').forEach(b=>{
-        b.addEventListener('click', onBuyClick);
-      });
+      productsEl.querySelectorAll('button.buy-btn').forEach(b=> b.addEventListener('click', onBuyClick));
     }
 
     // utility sha256
@@ -261,6 +263,17 @@
         else localStorage.removeItem('market_user');
       }
     })();
+
+    // helpers
+    function getContrastColor(hex){
+      if(!hex || hex === 'rainbow') return '#000';
+      const c = hex.replace('#','');
+      const r = parseInt(c.substr(0,2),16);
+      const g = parseInt(c.substr(2,2),16);
+      const b = parseInt(c.substr(4,2),16);
+      const yiq = (r*299 + g*587 + b*114)/1000;
+      return yiq >= 128 ? '#000' : '#fff';
+    }
   </script>
 </body>
 </html>
