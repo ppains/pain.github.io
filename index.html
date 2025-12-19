@@ -29,6 +29,9 @@
        <a href="gunluk.html" id="menuDailyBtn" class="menu-link"><i class="fa-solid fa-gift"></i> Günlük</a>
        <a href="kullanici.html" class="menu-link"><i class="fa-solid fa-user"></i></i> Kullanıcılar </a>
 <a href="profilduzen.html" class="menu-link"><i class="fa-solid fa-user-pen"></i></i> Profilim </a>
+<a href="dm.html" class="menu-link"><i class="fa-solid fa-envelope"></i> DM</a>
+<a href="klan.html" class="menu-link"><i class="fa-solid fa-users"></i> Klan</a>
+<a href="sqgame.html" class="menu-link"><i class="fa-solid fa-baby"></i>Squid Game</a>
 <a href="oda.html" id="menuRoomsBtn" class="menu-link"><i class="fa-solid fa-door-open"></i> Odalar</a>
         <a href="sohret.html" class="menu-link" id="menuFameBtn" onclick="openLeaderboard('fame')"><i class="fa-solid fa-sack-dollar"></i> Şöhret Sıralaması</a>
         <a href="rank.html" class="menu-link" id="menuRankBtn" onclick="openLeaderboard('rank')"><i class="fa-solid fa-trophy"></i> Rank Sıralaması</a>
@@ -320,7 +323,6 @@
     
     <div id="toastContainer"></div>
  
- 
   </div>
   </div>
 
@@ -392,10 +394,18 @@
       messagingSenderId: "339863121380",
       appId: "1:339863121380:web:123195552e821b085e6bf1"
     };
-    firebase.initializeApp(firebaseConfig);
+    if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
     const storage = firebase.storage();
+
+    // -- ROLE / TAG renk haritası
+    const ROLE_MAP = {
+      'vip-': { label: 'VIP-', color: '#3b82f6', contrast: '#fff', multiplier: 1.25, withdrawBonusPercent: 10 },
+      'vip+': { label: 'VIP+', color: '#ef4444', contrast: '#fff', multiplier: 1.5, withdrawBonusPercent: 20 },
+      'mvp-': { label: 'MVP-', color: '#fbbf24', contrast: '#000', multiplier: 1.75, withdrawBonusPercent: 30 },
+      'mvp+': { label: 'MVP+', color: 'rainbow', contrast: '#000', perClickDollar: 1.00, withdrawBonusPercent: 50, priorityWithdraw: true }
+    };
 
     // MENÜ VE PANEL AÇMA KAPAMA FONKSİYONLARI (Extra JS)
     function toggleSideMenu() {
@@ -410,53 +420,221 @@
        });
        el.classList.toggle('open');
     }
-   function getUserBonuses(userData){
-  // userData: kullanıcı dokümanı alanları (obj)
-  // geri döner: { clickMultiplier, perClickDollar, withdrawBonusPercent, priorityWithdraw }
-  if(!userData) return { clickMultiplier: 1, perClickDollar: 0, withdrawBonusPercent: 0, priorityWithdraw:false };
-  return {
-    clickMultiplier: Number(userData.clickMultiplier) || 1,
-    perClickDollar: Number(userData.perClickDollar) || 0,
-    withdrawBonusPercent: Number(userData.withdrawBonusPercent) || 0,
-    priorityWithdraw: !!userData.priorityWithdraw
-  };
-}
 
-// Örnek: tıklama ödülü hesaplama
-// baseAmount: normalde bu tıklamada verilecek baz miktar ($ veya coin gibi)
-function computeClickReward(userData, baseAmount){
-  const b = getUserBonuses(userData);
-  if(b.perClickDollar && b.perClickDollar > 0){
-    // mvp+ tarzı: sabit $/tıklama
-    return { amount: Number(b.perClickDollar), type: 'dollar' };
-  }
-  const amount = Number(baseAmount) * Number(b.clickMultiplier || 1);
-  return { amount, type: 'dollar' }; // ya da 'coin' uygulamanıza göre değiştirin
-}
+    // Kullanıcı aboneliği / session
+    let currentUid = null;
+    let currentUserData = null;
+    let currentUserUnsub = null;
+    const clickBtn = document.getElementById('clickBtn');
+    const moneyEarnedEl = document.getElementById('moneyEarned');
+    const clickCountEl = document.getElementById('clickCount');
+    const profilePremiumBadge = document.getElementById('profilePremiumBadge');
+    const displayNameEl = document.getElementById('displayName');
 
-// Örnek: çekim bonus uygulanması
-// baseWithdraw: talep edilen/hesaplanan çekim miktarı
-function computeWithdrawFinal(userData, baseWithdraw){
-  const b = getUserBonuses(userData);
-  const bonusPercent = Number(b.withdrawBonusPercent || 0);
-  const bonusAmount = (Number(baseWithdraw) * bonusPercent) / 100;
-  const finalAmount = Number(baseWithdraw) + bonusAmount;
-  return { finalAmount, bonusAmount, priority: b.priorityWithdraw };
-}
+    function hexToRgba(hex, a=1){
+      if(!hex || hex === 'rainbow') return `rgba(0,0,0,${a})`;
+      const c = hex.replace('#','');
+      const r = parseInt(c.substr(0,2),16);
+      const g = parseInt(c.substr(2,2),16);
+      const b = parseInt(c.substr(4,2),16);
+      return `rgba(${r},${g},${b},${a})`;
+    }
+    function getContrastColor(hex){
+      if(!hex || hex === 'rainbow') return '#000';
+      const c = hex.replace('#','');
+      const r = parseInt(c.substr(0,2),16);
+      const g = parseInt(c.substr(2,2),16);
+      const b = parseInt(c.substr(4,2),16);
+      const yiq = (r*299 + g*587 + b*114)/1000;
+      return yiq >= 128 ? '#000' : '#fff';
+    }
 
-// Kullanım (örnek):
-// const reward = computeClickReward(userData, 0.10); // baz 0.10$ ise
-// // ödülü ver: userDoc.balance += reward.amount (bunu Firestore transaction ile yapın)
-// const withdraw = computeWithdrawFinal(userData, requestedAmount);
-// // withdraw.finalAmount ödenecek değer; withdraw.priority true ise öncelik atayın.
+    function getUserBonuses(userData){
+      if(!userData) return { clickMultiplier: 1, perClickDollar: 0, withdrawBonusPercent: 0, priorityWithdraw:false };
+      return {
+        clickMultiplier: Number(userData.clickMultiplier) || 1,
+        perClickDollar: Number(userData.perClickDollar) || 0,
+        withdrawBonusPercent: Number(userData.withdrawBonusPercent) || 0,
+        priorityWithdraw: !!userData.priorityWithdraw
+      };
+    }
 
-// ... Tıklama işlemlerinde kullan:
-let clickEarnings = 1 * getClickMultiplier(currentUser);
-if(currentUser.roles.includes('mvp+')) clickEarnings = 1; // Her tık 1$
-function openUserProfile(userId) {
-  // Veritabanından profil bilgilerini çek
-  window.location.href = `avatar.html?uid=${encodeURIComponent(userId)}`; // Veya modal açıcı fonksiyon!
-}
+    // Tıklama ödülü hesaplama (baseAmount $ baz)
+    function computeClickReward(userData, baseAmount){
+      const b = getUserBonuses(userData);
+      if(b.perClickDollar && b.perClickDollar > 0){
+        return { amount: Number(b.perClickDollar), type: 'dollar' };
+      }
+      const amount = Number(baseAmount) * Number(b.clickMultiplier || 1);
+      return { amount, type: 'dollar' };
+    }
+
+    // Abone ol / oturumu başlat
+    function startUserSession(uid){
+      if(currentUserUnsub) currentUserUnsub();
+      currentUid = uid;
+      currentUserUnsub = db.collection('users').doc(uid).onSnapshot(snap=>{
+        if(!snap.exists) {
+          currentUserData = null;
+          refreshUIForUser();
+          return;
+        }
+        currentUserData = snap.data();
+        currentUserData.uid = snap.id;
+        refreshUIForUser();
+      });
+    }
+
+    function stopUserSession(){
+      if(currentUserUnsub) currentUserUnsub();
+      currentUserUnsub = null;
+      currentUid = null;
+      currentUserData = null;
+      refreshUIForUser();
+    }
+
+    function refreshUIForUser(){
+      if(currentUserData){
+        displayNameEl.textContent = currentUserData.displayName || currentUserData.username || currentUserData.uid || 'Kullanıcı';
+        moneyEarnedEl.textContent = '$' + Number(currentUserData.balance || currentUserData.money || 0).toFixed(2);
+        clickCountEl.textContent = Number(currentUserData.totalClicks || currentUserData.clicks || 0).toLocaleString();
+        // Rol badge göster
+        const role = (currentUserData.role || '').toLowerCase();
+        if(role && ROLE_MAP[role]){
+          const cfg = ROLE_MAP[role];
+          profilePremiumBadge.style.display = 'inline-block';
+          profilePremiumBadge.textContent = cfg.label;
+          if(cfg.color === 'rainbow'){
+            profilePremiumBadge.style.background = 'linear-gradient(90deg,#ff004c,#ffd400,#00ff6a,#00d4ff,#7c3aed)';
+            profilePremiumBadge.style.color = cfg.contrast || '#000';
+            profilePremiumBadge.classList.add('glow-rainbow');
+          } else {
+            profilePremiumBadge.style.background = cfg.color;
+            profilePremiumBadge.style.color = cfg.contrast || getContrastColor(cfg.color);
+            profilePremiumBadge.classList.remove('glow-rainbow');
+          }
+        } else {
+          profilePremiumBadge.style.display = 'none';
+        }
+      } else {
+        displayNameEl.textContent = 'Misafir';
+        moneyEarnedEl.textContent = '$0.00';
+        clickCountEl.textContent = '0';
+        profilePremiumBadge.style.display = 'none';
+      }
+    }
+
+    // Basit cooldown koruması
+    let clickCooldown = false;
+    const BASE_CLICK_AMOUNT = 0.10; // örnek baz tıklama miktarı ($)
+
+    async function performClick(){
+      if(!currentUid || !currentUserData) { toast('Önce giriş yapın.'); return; }
+      if(clickCooldown) return;
+      clickCooldown = true;
+      setTimeout(()=> clickCooldown = false, 800); // 800ms cooldown
+
+      // hesapla
+      const reward = computeClickReward(currentUserData, BASE_CLICK_AMOUNT);
+      const amount = Number(reward.amount || 0);
+
+      try{
+        await db.runTransaction(async tx => {
+          const uRef = db.collection('users').doc(currentUid);
+          const snap = await tx.get(uRef);
+          if(!snap.exists) throw new Error('Kullanıcı bulunamadı');
+          const u = snap.data();
+          const newBalance = (Number(u.balance||u.money||0) + amount);
+          const totalClicks = Number(u.totalClicks || u.clicks || 0) + 1;
+          const dailyClicks = Number(u.dailyClicks || u.daily_clicks || 0) + 1;
+          tx.update(uRef, {
+            balance: newBalance,
+            totalClicks: totalClicks,
+            dailyClicks: dailyClicks,
+            lastClickAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        });
+        // UI güncellemesi firestore aboneliğiyle otomatik olacaktır
+        // küçük görsel feedback
+        pulseClickEffect(amount);
+      }catch(err){
+        console.error('Click error', err);
+        toast('Tıklama sırasında hata: '+ (err.message || err));
+      }
+    }
+
+    function pulseClickEffect(amount){
+      const old = moneyEarnedEl.textContent;
+      moneyEarnedEl.style.transition = 'transform 0.18s';
+      moneyEarnedEl.style.transform = 'scale(1.05)';
+      setTimeout(()=> moneyEarnedEl.style.transform = 'scale(1)', 180);
+      // kısa toast
+      toast(`+ $${Number(amount||0).toFixed(2)}`);
+    }
+
+    function toast(msg){
+      const c = document.getElementById('toastContainer');
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.style = 'background:rgba(0,0,0,0.7); color:#fff; padding:8px 12px; border-radius:8px; margin-top:8px;';
+      el.textContent = msg;
+      c.appendChild(el);
+      setTimeout(()=> { el.style.opacity = '0'; setTimeout(()=> el.remove(),400); }, 2200);
+    }
+
+    // market modal açma (market.html/ mmrkt.html ile uyum)
+    function openMarket(){
+      document.getElementById('marketModal').style.display = 'block';
+      loadMarketItemsIntoModal();
+    }
+    document.getElementById('marketCloseBtn').addEventListener('click', ()=> document.getElementById('marketModal').style.display='none');
+
+    // Basit ürün listesi (aynı ürünleri markette ekle)
+    const MARKET_PRODUCTS = [
+      { id: 'vip_minus', title: 'VIP-', priceCoins: 5000, role: 'vip-', color:'#3b82f6' },
+      { id: 'vip_plus', title: 'VIP+', priceCoins:10000, role: 'vip+', color:'#ef4444' },
+      { id: 'mvp_minus', title: 'MVP-', priceCoins:15000, role: 'mvp-', color:'#fbbf24' },
+      { id: 'mvp_plus', title: 'MVP+', priceCoins:20000, role: 'mvp+', color:'rainbow' }
+    ];
+    function loadMarketItemsIntoModal(){
+      const el = document.getElementById('marketItemsList');
+      el.innerHTML = '';
+      MARKET_PRODUCTS.forEach(p=>{
+        const card = document.createElement('div');
+        card.className = 'market-card';
+        card.style = 'background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.03);';
+        const colorStyle = p.color === 'rainbow' ? 'background:linear-gradient(90deg,#ff004c,#ffd400,#00ff6a,#00d4ff,#7c3aed); color:#000; padding:6px 8px; border-radius:6px;' : `background:${p.color}; color:${getContrastColor(p.color)}; padding:6px 8px; border-radius:6px;`;
+        card.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center;"><strong>${p.title}</strong><span style="${colorStyle}">${p.priceCoins.toLocaleString()} coin</span></div><div style="margin-top:8px;"><button class="buy-market-btn" data-id="${p.id}">Satın Al</button></div>`;
+        el.appendChild(card);
+      });
+      el.querySelectorAll('.buy-market-btn').forEach(b=> b.addEventListener('click', async (ev)=>{
+        const id = ev.currentTarget.dataset.id;
+        if(!currentUid){ toast('Önce giriş yapmalısınız.'); return; }
+        // yönlendir: ayrı market sayfas/ modal veya mmrkt.html satın alma işlemini tetikleyebilirsin.
+        // burada basitçe bir satın alma popup'ı sunmuyoruz, kullanıcı zaten market sayfasında da satın alabilir.
+        window.open('mmrkt.html', '_blank');
+      }));
+    }
+
+    // Başlangıç: session geri yükle (market sayfası lokal user id ile uyumlu)
+    (async function init(){
+      // sayfanın açılmasında auth kullanmıyorsan market ile kullanılan yerel uid'yi okuyalım
+      const savedUid = localStorage.getItem('market_user');
+      if(savedUid){
+        // var mı kontrol et
+        try{
+          const doc = await db.collection('users').doc(savedUid).get();
+          if(doc.exists) startUserSession(savedUid);
+          else localStorage.removeItem('market_user');
+        }catch(e){ console.error(e); }
+      }
+      // click buton handler
+      clickBtn.addEventListener('click', performClick);
+
+      // market modal button
+      document.getElementById('marketRefreshBtn').addEventListener('click', loadMarketItemsIntoModal);
+    })();
+
     // Başarı overlay kapatma
     window.closeSuccessOverlay = () => document.getElementById('successOverlay').style.display = 'none';
   </script>
